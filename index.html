@@ -68,6 +68,8 @@
     th,td{padding:12px;border-bottom:1px solid rgba(255,255,255,.10);vertical-align:middle;text-align:left}
     th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.72);background:rgba(255,255,255,.08);position:sticky;top:0;z-index:2}
     td input[type="number"]{min-width:110px}
+    td input.score-input{min-width:110px;text-align:center;font-weight:700;font-size:15px}
+    td input.score-input.is-pending{color:var(--danger);border-color:rgba(255,107,122,.5);background:rgba(255,107,122,.08)}
     .totalCell{font-size:22px;font-weight:950;color:var(--yellow);text-align:center}
     .rank{font-weight:950;color:var(--cyan)}
     .footerbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:15px 20px;background:rgba(255,255,255,.07)}
@@ -77,6 +79,12 @@
     .logoText{font-weight:950;letter-spacing:.02em}.logoText span{color:var(--cyan)}
     .remaining{font-size:11px;color:var(--cyan);margin-top:4px; font-weight:600;}
     .waiting { background: rgba(255,230,109,0.15) !important; }
+    .rank-1 { background: linear-gradient(90deg, rgba(255,215,0,.22), rgba(255,215,0,.06)) !important; border-left: 3px solid rgba(255,215,0,.8); }
+    .rank-2 { background: linear-gradient(90deg, rgba(192,192,192,.20), rgba(192,192,192,.05)) !important; border-left: 3px solid rgba(192,192,192,.7); }
+    .rank-3 { background: linear-gradient(90deg, rgba(205,127,50,.22), rgba(205,127,50,.06)) !important; border-left: 3px solid rgba(205,127,50,.8); }
+    .rank-1 .rank { color: #ffd700; text-shadow: 0 0 10px rgba(255,215,0,.6); }
+    .rank-2 .rank { color: #c0c0c0; text-shadow: 0 0 10px rgba(192,192,192,.5); }
+    .rank-3 .rank { color: #cd7f32; text-shadow: 0 0 10px rgba(205,127,50,.5); }
   </style>
 </head>
 <body>
@@ -178,7 +186,8 @@
       if(seen.has(key)) return false; seen.add(key); return true;
     });
   }
-  function num(v){ return Math.max(0, Number(v || 0)); }
+  function num(v){ return v === null || v === undefined ? 0 : Math.max(0, Number(v)); }
+  function isPending(v){ return v === null; } // null = još nije uneseno
   function finalists(){ return Math.max(1, parseInt(el('finalistsCount').value || '25', 10)); }
   function participants(){ return Math.max(1, parseInt(el('participantsCount').value || '35', 10)); }
   
@@ -204,9 +213,9 @@
       const totalA = num(a.jury) + num(a.public);
       const totalB = num(b.jury) + num(b.public);
 
-      // Države sa 0 publike idu na VRH
-      if (a.public === 0 && b.public !== 0) return -1;
-      if (a.public !== 0 && b.public === 0) return 1;
+      // Države kojima još nije unesena publika (null) idu na VRH
+      if (isPending(a.public) && !isPending(b.public)) return -1;
+      if (!isPending(a.public) && isPending(b.public)) return 1;
 
       // Ako obe imaju publiku ili obe nemaju → sortiraj po ukupnom
       if (totalB !== totalA) return totalB - totalA;
@@ -217,8 +226,8 @@
   }
 
   function recalc(){
-    const usedPublic = state.rows.reduce((a,r)=>a+num(r.public),0);
-    const usedJury = state.rows.reduce((a,r)=>a+num(r.jury),0);
+    const usedPublic = state.rows.reduce((a,r)=> a + (isPending(r.public) ? 0 : num(r.public)), 0);
+    const usedJury = state.rows.reduce((a,r)=> a + (isPending(r.jury) ? 0 : num(r.jury)), 0);
     const {publicPool,juryPool} = pools();
 
     el('publicPool').textContent = publicPool;
@@ -286,22 +295,37 @@
     tbody.innerHTML = '';
     el('empty').style.display = state.rows.length ? 'none' : 'block';
 
+    // Pronađi top 3 reda koji imaju unesenu publiku (nisu pending)
+    const rankedRows = state.rows.filter(r => !isPending(r.public));
+
     state.rows.forEach((r, idx) => {
       const remaining = getRemainingPublicForRow(r);
-      const publicDisplay = r.public === 0 ? '00' : r.public;
 
       const tr = document.createElement('tr');
-      if (r.public === 0) tr.classList.add('waiting');
+      if (isPending(r.public)) {
+        tr.classList.add('waiting');
+      } else {
+        const medalRank = rankedRows.indexOf(r); // 0, 1, 2 = gold, silver, bronze
+        if (medalRank === 0) tr.classList.add('rank-1');
+        else if (medalRank === 1) tr.classList.add('rank-2');
+        else if (medalRank === 2) tr.classList.add('rank-3');
+      }
+
+      const juryPending = isPending(r.jury);
+      const publicPending = isPending(r.public);
+      const total = num(r.jury) + num(r.public);
 
       tr.innerHTML = `
         <td class="rank">${idx+1}</td>
         <td><select data-id="${r.id}" data-field="country">${countryOptions(r.id, r.country)}</select></td>
-        <td><input type="number" min="0" data-id="${r.id}" data-field="jury" value="${r.jury}" placeholder="0"></td>
         <td>
-          <input type="number" min="0" data-id="${r.id}" data-field="public" value="${r.public}" placeholder="0">
-          ${r.public === 0 ? `<div class="remaining">max još: ${remaining}</div>` : ''}
+          <input class="score-input${juryPending?' is-pending':''}" type="text" inputmode="numeric" pattern="[0-9]*" data-id="${r.id}" data-field="jury" value="${juryPending?'':r.jury}" placeholder="—">
         </td>
-        <td class="totalCell">${num(r.jury)+num(r.public)}</td>
+        <td>
+          <input class="score-input${publicPending?' is-pending':''}" type="text" inputmode="numeric" pattern="[0-9]*" data-id="${r.id}" data-field="public" value="${publicPending?'':r.public}" placeholder="—">
+          ${publicPending ? `<div class="remaining">max još: ${remaining}</div>` : ''}
+        </td>
+        <td class="totalCell">${total}</td>
         <td><button class="danger" data-remove="${r.id}">Obriši</button></td>`;
       tbody.appendChild(tr);
     });
@@ -310,21 +334,39 @@
     updateChart();
   }
 
-  // Event listeners
   el('tbody').addEventListener('focusin', e => {
-    if (e.target.type === 'number' && e.target.value === '0') {
-      e.target.value = '';
+    if (e.target.classList.contains('score-input')) {
+      e.target.select();
+    }
+  });
+
+  el('tbody').addEventListener('focusout', e => {
+    if (e.target.classList.contains('score-input')) {
+      const id = Number(e.target.dataset.id);
+      const field = e.target.dataset.field;
+      if(!id || !field) return;
+      const row = state.rows.find(r => r.id === id);
+      if(!row) return;
+      const raw = e.target.value.trim();
+      // Prazno polje = null (još nije uneseno), broj (uključujući 0) = stvarna vrijednost
+      row[field] = raw === '' ? null : Math.max(0, parseInt(raw, 10) || 0);
+      render();
+    }
+  });
+
+  el('tbody').addEventListener('click', e => {
+    if(e.target.dataset.remove) {
+      state.rows = state.rows.filter(r => r.id !== Number(e.target.dataset.remove));
+      render();
     }
   });
 
   el('tbody').addEventListener('change', e => {
-    const id = Number(e.target.dataset.id);
-    const field = e.target.dataset.field;
-    if(!id || !field) return;
-    const row = state.rows.find(r => r.id === id);
-    if(!row) return;
-    row[field] = field === 'country' ? e.target.value : num(e.target.value);
-    render(); // auto sort + refresh
+    if(e.target.tagName === 'SELECT') {
+      const id = Number(e.target.dataset.id);
+      const row = state.rows.find(r => r.id === id);
+      if(row) { row.country = e.target.value; render(); }
+    }
   });
 
   // Tab navigacija
@@ -365,7 +407,7 @@
 
   el('addRow').addEventListener('click', () => {
     if(state.rows.length >= finalists() && !confirm('Već imaš maksimalan broj redova. Dodati još?')) return;
-    state.rows.unshift({ id: state.nextId++, country:'', jury:0, public:0 });
+    state.rows.unshift({ id: state.nextId++, country:'', jury:null, public:null });
     render();
   });
 
